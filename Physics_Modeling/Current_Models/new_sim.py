@@ -29,7 +29,7 @@ centroid_lengths = [asl[0]*0.5,asl[1]*0.5, asl[2]*0.5]
 
 # goal point of end effector (x,y,z)
 # (in meters)
-goal_point = [0.1, 0.1, 0.05]
+goal_point = [0.2, 0.2, 0.05]
 
 # number of time samples
 num_samples = 50
