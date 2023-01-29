@@ -8,7 +8,7 @@ import matplotlib
 import pickle
 
 # theta 1 - 5
-initial_angles = [0,0,0,0,0]
+initial_angles = [0, 0, 0, 0, 0]
 
 # arm length segments 
 asl = [0.330, 0.150, 0.100]
@@ -27,6 +27,14 @@ centroids = [0.5,0.75,0.65]
 # distance from arm segment begining to centroids (m)
 centroid_lengths = [asl[0]*0.5,asl[1]*0.5, asl[2]*0.5] 
 
+# goal point of end effector (x,y,z)
+# (in meters)
+goal_point = [0.1, 0.1, 0.05]
+
+# number of time samples
+num_samples = 50
+
+
 # ----------------------------------
 # The class Path focuses on the creation of motion planning
 # including inverse kinematics, joint motion interpolation,
@@ -41,8 +49,10 @@ class Path(object):
 		# 1 rotation of the stepper motor
 		# define max angular velocity
 		# define max acceleration
+
+		microsteps = 200
 		self.values = {"iA": initial_angles, "len": arm_segment_lengths,
-    	            "w_max": np.pi, "accel": np.pi/8}
+    	            "w_max": np.pi, "accel": np.pi/8, "micro_steps": microsteps}
 		self.h = height
 		self.dist = dist_to_pivot
 		self.wa_max = self.values['w_max']
@@ -78,8 +88,12 @@ class Path(object):
 		l2 = self.values['len'][1]
 		l3 = self.values['len'][2]
 
+		# magnitude of end effector position vector
 		end_e_mag = np.sqrt(x**2+y**2+z**2)
 
+		# maximum reach of arm, where self.dist represents the distance to 
+		# from the end of l1 to the base's pivot point, and self.h represents
+		# the height of the robot's base
 		max_reach = np.sqrt(((l1-self.dist)+l2)**2-(self.h-l3)**2)
 
 		# if the distance to the point from the
@@ -93,9 +107,20 @@ class Path(object):
 			bool = True
 		else:
 			pass
+
 		# bool represents the boolean of whether or
 		# not the arm is able to reach its goal
 		if bool:
+
+			# h is the distance from base pivot to the 
+			# goal point
+			h = np.sqrt(x**2+y**2+(z-self.h+l3)**2)
+
+			# w reprents the radial length of the arm projected
+			# onto the xy-plane
+			w = np.sqrt((x**2 + y**2))
+
+			l1 = l1 - self.dist
 			# Φ1, Φ2, and Φ4 reprent internal
 			# angles to the triangle created by the two arm
 			# segments
@@ -118,7 +143,7 @@ class Path(object):
 			# Φ4 can be found by inverse tangent of the arm's
 			# radial length and the height above the ground
 			if w != 0:
-				phi4 = np.arctan(abs(z)/abs(w))
+				phi4 = np.arctan((z-self.h+l3)/abs(w))
 			elif w == 0:
 				phi4 = (np.pi/2)
 			else:
@@ -146,7 +171,7 @@ class Path(object):
 
 			# path consists of a list of all of the angles at any given postion in degrees
 			path = [np.degrees(angle1), np.degrees(
-				angle2), np.degrees(angle3), np.degrees(angle4)]
+				angle2), np.degrees(angle3), np.degrees(angle4), 270]
 		else:
 			pass
 
@@ -161,13 +186,13 @@ class Path(object):
 		# the joint will move through, and whether or
 		# not the joint will reach maximum angular velocity
 		# --- [total_time, angle_moved,] ---
-		path = [[0, 0, None], [0, 0, None], [0, 0, None], [0, 0, None]]
+		path = [[0, 0, None], [0, 0, None], [0, 0, None], [0, 0, None], [0, 0, None]]
 		a = self.values['accel']
-
+		num_angles = 4
 		# for loop will create a list of all the times
 		# and angles with the set max acceleration/
 		# deceleration
-		for w in range(0, 4):
+		for w in range(0, num_angles):
 			# adjust values if outside of range 0-360
 			if (inital[w]) > 360:
 				inital[w] = inital[w] - 360
@@ -264,8 +289,8 @@ class Path(object):
 		base_time = path[0][0]/2
 		t_time = path[0][0]
 		print('Total Time', t_time)
-		accel = [0, 0, 0, 0]
-		for x in range(0, 4):
+		accel = [0, 0, 0, 0, 0]
+		for x in range(0, num_angles):
 			if not copy[w][2]:
 				a = np.radians(copy[x][1])/(base_time**2)
 				accel[x] = a
@@ -358,7 +383,8 @@ class Path(object):
 		# path will consist of a list of lists where
 		# each index of the path represents the list of
 		# angular values each joint will be at during the motion
-		path = [[], [], [], []]
+		path = [[], [], [], [], []]
+		num_angles = 4
 
 		# # p is the number of divisions each path will
 		# # broken up into
@@ -369,9 +395,9 @@ class Path(object):
 		R = self.values['micro_steps']/(2*np.pi)
 
 		# division of time definition
-		divisions = [0, 0, 0, 0]
+		divisions = [0, 0, 0, 0, 0]
 
-		for w in range(0, 4):
+		for w in range(0, num_angles):
 			a = accel[w]
 			if final[w] != inital[w]:
 				couple = [final[w], inital[w]]
@@ -614,20 +640,24 @@ class Path(object):
 
 
 class Plot(object):
-	def __init__(self, path, lengths_m, inital_angles, t_time, p, divisions, accel, print_torques):
+	def __init__(self, initial_angles, arm_segment_lengths, dist_to_pivot, height, path, t_time, p, divisions, accel, goal):
 		# define stepper settings
-		self.values = {"iA": inital_angles, "len": lengths_m,
+		self.values = {"iA": initial_angles, "len": arm_segment_lengths,
     	            "w_max": np.pi, "accel": np.pi/8, "mass": [0.15, 0.2, 0.4]}
 		# define class variable versions of arm segments
-		self.l1 = lengths_m[0]
-		self.l2 = lengths_m[1]
-		self.l3 = lengths_m[2]
+		self.l1 = arm_segment_lengths[0]
+		self.l2 = arm_segment_lengths[1]
+		self.l3 = arm_segment_lengths[2]
 		#
+		self.height = height
+		self.dist = dist_to_pivot
+		self.goal = goal
+
 		self.p = p
 		self.t_time = t_time
 		self.accel = accel
 		self.divisions = divisions
-		self.print_torques = print_torques
+		self.print_torques = True
 
 		# declare plt is interactive
 		plt.ion()
@@ -653,18 +683,27 @@ class Plot(object):
 		# set serves as empy lists for defining lines
 		# to be plotted
 		set = [[[], []], [[], []], [[], []], [[], []], [[], []], [[], []]]
-		self.line0, = self.ax.plot(set[0][0], set[0][1], 'bo', linestyle='solid')
-		self.line1, = self.ax.plot(set[1][0], set[1][1], 'bo', linestyle='solid')
-		self.line2, = self.ax.plot(set[2][0], set[2][1], 'bo', linestyle='solid')
-		self.line3, = self.ax.plot(
-    	        set[3][0], set[3][1], 'bo', linestyle='solid', color='red')
-		self.line4, = self.ax.plot(
-    	        set[4][0], set[4][1], 'bo', linestyle='solid', color='red')
+		self.line0, = self.ax.plot(
+			set[0][0], set[0][1], 'bo', linestyle='solid', color='black', linewidth=4)
+		self.line1, = self.ax.plot(
+			set[1][0], set[1][1], 'bo', linestyle='solid', color='black', linewidth=4)
+		self.line2, = self.ax.plot(set[2][0], set[2][1], 'bo', linestyle='solid', color='black', linewidth=4)
+		self.line3, = self.ax.plot(set[2][0], set[2][1], 'bo', linestyle='solid', color='black', linewidth=4)
+		self.line4, = self.ax.plot(set[2][0], set[2][1], 'bo', linestyle='solid', color='black', linewidth=4)
 		self.line5, = self.ax.plot(
-    	        set[5][0], set[5][1], 'bo', linestyle='solid', color='red')
+			set[2][0], set[2][1], 'bo', linestyle='solid', color='red')
+		self.line6, = self.ax.plot(
+			set[2][0], set[2][1], 'bo', linestyle='solid', color='red')
+
+		# self.line3, = self.ax.plot(
+    	#         set[3][0], set[3][1], 'bo', linestyle='solid', color='red')
+		# self.line4, = self.ax.plot(
+    	#         set[4][0], set[4][1], 'bo', linestyle='solid', color='red')
+		# self.line5, = self.ax.plot(
+    	#         set[5][0], set[5][1], 'bo', linestyle='solid', color='red')
 
 		# loops animation 25 times
-		for x in range(0, 1):
+		for x in range(0, 25):
 			self.loop(path)
 
 	# define x axis rotation matrix
@@ -697,44 +736,262 @@ class Plot(object):
 
 		# angle 4 end effector rotation, angle 5 base rotation
 		self.angle4 = np.radians(angles[3])
-		self.angle5 = np.radians(angles[4])
+		# self.angle5 = np.radians(angles[4])
 
 		# rotation matrices
-		r_ab = self.R_z(np.degrees(self.angle5))
+		r_0a = self.R_z(0)
+		r_ab = self.R_z(np.degrees(self.angle4))
 		r_bc = self.R_y(np.degrees(self.angle1))
 		r_cd = self.R_y(np.degrees(self.angle2))
 		r_de = self.R_y(np.degrees(self.angle3))
+		r_bf = self.R_y(np.degrees(self.angle1+180))
+		# r_dg = self.R_y(np.degrees(self.angle4))
 
 		# displacement matricies
+		d_0a = [[0], [0], [self.height]]
 		d_ab = [[0], [0], [0]]
-		d_bc = [[np.sin(self.angle1)*self.l1], [0], [np.cos(self.angle1)*self.l1]]
+		d_bc = [[np.sin(self.angle1)*(self.l1-self.dist)], [0], [np.cos(self.angle1)*(self.l1-self.dist)]]
 		d_cd = [[np.sin(self.angle2)*self.l2], [0], [np.cos(self.angle2)*self.l2]]
 		d_de = [[np.sin(self.angle3)*self.l3], [0], [np.cos(self.angle3)*self.l3]]
+		d_bf = [[-np.sin(self.angle1)*self.dist], [0], [-np.cos(self.angle1)*self.dist]]
 
 		# homogenous transfer matricies
+		#
+		h_0a = np.concatenate((r_0a, d_0a), 1)
+		h_0a = np.concatenate((h_0a, [[0, 0, 0, 1]]), 0)
+		#
 		h_ab = np.concatenate((r_ab, d_ab), 1)
 		h_ab = np.concatenate((h_ab, [[0, 0, 0, 1]]), 0)
 		#
-		h_bc = np.concatenate((r_bc, d_bc), 1)
-		h_bc = np.concatenate((h_bc, [[0, 0, 0, 1]]), 0)
+		self.h_bc = np.concatenate((r_bc, d_bc), 1)
+		self.h_bc = np.concatenate((self.h_bc, [[0, 0, 0, 1]]), 0)
 		#
 		h_cd = np.concatenate((r_cd, d_cd), 1)
 		h_cd = np.concatenate((h_cd, [[0, 0, 0, 1]]), 0)
 		#
 		h_de = np.concatenate((r_de, d_de), 1)
 		h_de = np.concatenate((h_de, [[0, 0, 0, 1]]), 0)
+		#
+		#
+		self.h_bf = np.concatenate((r_bf, d_bf), 1)
+		self.h_bf = np.concatenate((self.h_bf, [[0, 0, 0, 1]]), 0)
+		#
 
 		# define homogenous transformation
 		# matricies for finding torque
-		self.h_ac = np.dot(h_ab, h_bc)
-		self.h_ad = np.dot(self.h_ac, h_cd)
-		self.h_ae = np.dot(self.h_ad, h_de)
+		self.h_0b = np.dot(h_0a, h_ab)
+		self.h_0c = np.dot(self.h_0b, self.h_bc)
+		self.h_0d = np.dot(self.h_0c, h_cd)
+		self.h_0e = np.dot(self.h_0d, h_de)
+		self.h_0f = np.dot(self.h_0b, self.h_bf)
+		
+		self.h_be = np.dot(np.dot(self.h_bc,h_cd),h_de)
+		self.h_ce = np.dot(h_cd,h_de)
 
 		# call torque path to find torque values for each joint
 		self.torque_path(t)
 
 		# returns list of x,y,z for each arm joint and end effectorself.
-		return [[[0, self.h_ac[0][3]], [0, self.h_ac[1][3]], [0, self.h_ac[2][3]]],
-                    [[self.h_ac[0][3], self.h_ad[0][3]], [self.h_ac[1][3],
-                    	self.h_ad[1][3]], [self.h_ac[2][3], self.h_ad[2][3]]],
-                    [[self.h_ad[0][3], self.h_ae[0][3]], [self.h_ad[1][3], self.h_ae[1][3]], [self.h_ad[2][3], self.h_ae[2][3]]]]
+		return [[[0, self.h_0b[0][3]], [0, self.h_0b[1][3]], [0, self.h_0b[2][3]]],
+	  				[[self.h_0b[0][3], self.h_0f[0][3]], [self.h_0b[1][3],
+                    	self.h_0f[1][3]], [self.h_0b[2][3], self.h_0f[2][3]]],
+                    [[self.h_0b[0][3], self.h_0c[0][3]], [self.h_0b[1][3],
+                    	self.h_0c[1][3]], [self.h_0b[2][3], self.h_0c[2][3]]],
+                    [[self.h_0c[0][3], self.h_0d[0][3]], [self.h_0c[1][3], self.h_0d[1][3]], [self.h_0c[2][3], self.h_0d[2][3]]],
+               					[[self.h_0d[0][3], self.h_0e[0][3]], [self.h_0d[1][3], self.h_0e[1][3]], [self.h_0d[2][3], self.h_0e[2][3]]]]
+
+	# calls the torque functions
+	def torque_path(self, t):
+		self.stepper1_torque(t)
+		self.stepper2_torque(t)
+		# self.stepper3_torque(t)
+
+		if self.print_torques:
+			self.torque1.append(round(
+				np.sqrt((self.orgin_t[0]**2)+(self.orgin_t[1]**2)+(self.orgin_t[2]**2)), 3))
+			# print("Pivot Torque: ", round(np.sqrt((self.orgin_t[0]**2)+(self.orgin_t[1]**2)+(self.orgin_t[2]**2)), 3), " Nm")
+			self.torque2.append(round(
+				np.sqrt((self.motor2_t[0]**2)+(self.motor2_t[1]**2)+(self.motor2_t[2]**2)), 3))
+			# self.torque3.append(round(
+			# 	np.sqrt((self.motor3_t[0]**2)+(self.motor3_t[1]**2)+(self.motor3_t[2]**2)), 3))
+
+	def stepper1_torque(self, t):
+		# define the list for torque values in
+		# the x,y,z direction around the orgin
+		self.orgin_t = [0, 0, 0]
+
+		# divisions mark the acceleration of the stepper
+		# motor throughout its travel path
+		if t <= self.divisions[0][0]:
+			a = self.accel[0]
+		elif (self.divisions[0][0] + self.divisions[0][1]) > t > self.divisions[0][0]:
+			a = 0
+		elif t >= (self.divisions[0][0] + self.divisions[0][1]):
+			a = - self.accel[0]
+		else:
+			pass
+		# print("Acceleration for Stepper 1:", a)
+		if t <= self.divisions[3][0]:
+			a4 = self.accel[3]
+		elif (self.divisions[3][0] + self.divisions[3][1]) > t > self.divisions[3][0]:
+			a4 = 0
+		elif t >= (self.divisions[3][0] + self.divisions[3][1]):
+			a4 = - self.accel[3]
+		else:
+			pass
+
+		# ac represents the position vector of stepper 2
+		# relative to stepper 1
+		bc = [self.h_bc[0][3], self.h_bc[1][3], self.h_bc[2][3]]
+		# print("Magnitude BC: ", self.magnitude(bc))
+
+		# tg2 represents the torque due to gravity on
+		# stepper 1 (representing stepper motor 1) from stepper 2
+		tg2 = np.cross(bc, [0, 0, -9.81*self.values["mass"][1]])
+		# print("tg2: ",tg2)
+
+		# tm2 represents the torque on stepper 1 due to the
+		# rotational acceleration of the mass at point ac
+		tm2 = np.cross(bc, [(np.cos(self.angle4)*a4*self.values["mass"][1]),
+                      (np.sin(self.angle4)*a4*self.values["mass"][1]), (a*self.values["mass"][1])])
+
+		# ad represents the position vector from the orgin to
+		# stepper motor 3
+		bf = [self.h_bf[0][3], self.h_bf[1][3], self.h_bf[2][3]]
+		# print("Magnitude BF: ", self.magnitude(bf))
+		# tg3 represents the torque on stepper 1 from the weight of stepper 3
+		tg3 = np.cross(bf, [0, 0, -9.81*self.values["mass"][0]])
+		# print("tg3: ", tg3)
+
+		# tm3 represents the torque on s tepper 1 from the rotational acceleration of stepper motor 3
+		tm3 = np.cross(bf, [(np.cos(self.angle1)*self.magnitude(bf)*a4*self.values["mass"][0]),
+                      (np.sin(self.angle4)*a4*self.values["mass"][0]), (a*self.values["mass"][0])])
+
+		# ae represents the position vector of the end effector relative to stepper 1
+		be = [self.h_be[0][3], self.h_be[1][3], self.h_be[2][3]]
+
+		# tge represents the torque due to gravity on stepper 1
+		# from the mass of the end effector
+		tge = np.cross(be, [0, 0, -9.81*self.values["mass"][2]])
+
+		# tme represents the torque on stepper 1 due to the rotational
+		# acceleration of the end effector
+		tme = np.cross(be, [(np.sin(self.angle1)*self.magnitude(be)*a4*self.values["mass"][2]),
+                      (np.cos(self.angle4)*a4*self.values["mass"][2]), (a*self.values["mass"][2])])
+
+		# vector sum of all of the torques on stepper motor 1
+		for x in range(0, 3):
+			self.orgin_t[x] = round(tg2[x] + tge[x] +
+			   						tg3[x] + tm3[x] +
+			                        tm2[x] + tme[x], 3)
+
+	# estimates the torque on stepper 2
+	def stepper2_torque(self, t):
+		# define class variable for the torque on
+		# stepper 2
+		self.motor2_t = [0, 0, 0]
+
+		# define the acceleration of the joints connected to
+		# stepper motor 2
+		if t <= self.divisions[1][0]:
+			a = self.accel[1]
+		elif (self.divisions[1][0] + self.divisions[1][1]) > t > self.divisions[1][0]:
+			a = 0
+		elif t >= (self.divisions[1][0] + self.divisions[1][1]):
+			a = - self.accel[1]
+		else:
+			pass
+
+		# define the acceleration due to the rotation of stepper 4
+		if t <= self.divisions[3][0]:
+			a4 = self.accel[3]
+		elif (self.divisions[3][0] + self.divisions[3][1]) > t > self.divisions[3][0]:
+			a4 = 0
+		elif t >= (self.divisions[3][0] + self.divisions[3][1]):
+			a4 = - self.accel[3]
+		else:
+			pass
+
+		# cd represents the position vector of stepper 3 relative to stepper 1
+		ce = [self.h_ce[0][3], self.h_ce[1][3], self.h_ce[2][3]]
+		# print("Magnitude cE:", self.magnitude(ce))
+		print("CE : ", ce)
+
+		# torque on stepper 2 due to the weight of stepper 3
+		tg3 = np.cross(ce, [0, 0, -9.81*self.values["mass"][2]])
+
+		# torque on stepper 2 due to the rotational acceleration of stepper 3
+		# tm3 = np.cross(ce, [(np.cos(self.angle4)*a4*self.values["mass"][1]),
+        #               (np.sin(self.angle4)*a4*self.values["mass"][1]), (a*self.values["mass"][1])])
+		
+		# vector sum of the torques
+		for x in range(0, 3):
+			self.motor2_t[x] = round(tg3[x], 3)
+
+	def loop(self, path):
+		self.path_len = len(path[0])
+		# print(path)
+		# iterates through the list of angles
+		self.times = []
+		# scales up the size for model
+		scale = 1000
+		self.ax.scatter(np.dot(self.goal[0], scale), np.dot(self.goal[1], scale),
+                  np.dot(self.goal[2], scale), color='r')
+		for self.x in range(0, self.p):
+			#
+			t = (self.t_time/self.p)*(self.x+1)
+			self.times.append(t)
+			# print("Time:", t)
+
+			# defines lines as a list of points representing the joints and end effector of the arm
+			lines = self.position(
+				[path[0][self.x], path[1][self.x], path[2][self.x], path[3][self.x]], t)
+
+			self.line0.set_data_3d(np.dot(lines[0][0], scale), np.dot(
+				lines[0][1], scale), np.dot(lines[0][2], scale))
+			#
+			self.line1.set_data_3d(np.dot(lines[1][0], scale), np.dot(
+				lines[1][1], scale), np.dot(lines[1][2], scale))
+			#
+			self.line2.set_data_3d(np.dot(lines[2][0], scale), np.dot(
+				lines[2][1], scale), np.dot(lines[2][2], scale))
+			#
+			self.line3.set_data_3d(np.dot(lines[3][0], scale), np.dot(
+				lines[3][1], scale), np.dot(lines[3][2], scale))
+			#
+			self.line4.set_data_3d(np.dot(lines[4][0], scale), np.dot(
+				lines[4][1], scale), np.dot(lines[4][2], scale))
+			# #
+			self.line5.set_data_3d(np.dot([lines[1][0][0], self.orgin_t[0] + lines[1][0][0]], scale), np.dot([lines[1][1][0], self.orgin_t[1] + lines[1][1][0]], scale),
+                          np.dot([lines[1][2][0], self.orgin_t[2] + lines[1][2][0]], scale))
+			# #
+			self.line6.set_data_3d(np.dot([lines[3][0][0], self.motor2_t[0] + lines[3][0][0]], scale), np.dot([lines[3][1][0], self.motor2_t[1] + lines[3][1][0]], scale),
+                          np.dot([lines[3][2][0], self.motor2_t[2] + lines[3][2][0]], scale))
+
+			# print("x: ",self.magnitude(np.dot([lines[1][0][0],self.motor2_t[0]],1000)))
+			# print("y: ",self.magnitude(np.dot([lines[1][1][0],self.motor2_t[1]],1000)))
+			# print("z: ",self.magnitude(np.dot([lines[1][2][0],self.motor2_t[2]],1000)))
+
+			# path of end effector
+			self.fig.canvas.draw()
+			self.fig.canvas.flush_events()
+			time.sleep(0.0001)
+			# if (self.x == (self.p-1)):
+
+			# 	with open("saved_torques.pkl", "r+") as f:
+			# 		f.truncate(0)
+
+			# 	with open("saved_torques.pkl", "wb") as f:
+			# 		# pickled = pickle.dumps(torques,0)
+			# 		pickle.dump([self.torque1, self.torque2, self.torque3, self.times[-1]], f)
+			# 		# f.close()
+			# 		print("saved data")
+				# break
+				# print("\nTorque 1: ", self.torque1)
+				# print("\nTorque 2: ", self.torque2)
+				# print("\nTorque 3: ", self.torque3)
+
+path = Path(initial_angles, asl, distance_to_pivot, height, goal_point, num_samples)
+print("Length of path is :", len(path.path))
+plot = Plot(initial_angles, asl, distance_to_pivot, height, path.path,
+            path.t_time, num_samples, path.divisions, path.accel, goal_point)
